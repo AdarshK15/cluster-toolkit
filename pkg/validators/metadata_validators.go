@@ -299,24 +299,6 @@ func (r *RangeValidator) Validate(
 // ExclusiveValidator implements the RuleValidator interface for the 'exclusive' validation type.
 type ExclusiveValidator struct{}
 
-// isVarSet returns true if the value is known, non-null, and non-empty (positive number, non-empty string, true bool, or non-empty collection).
-func (e *ExclusiveValidator) isVarSet(val cty.Value) bool {
-	if val.IsNull() || !val.IsKnown() {
-		return false
-	}
-	switch val.Type() {
-	case cty.String:
-		return val.AsString() != ""
-	case cty.Number:
-		return val.AsBigFloat().Sign() != 0
-	case cty.Bool:
-		return val.True()
-	default:
-		// For lists, maps, and sets, consider them "set" if they are not empty.
-		return val.LengthInt() > 0
-	}
-}
-
 // Validate returns an error if more than one of the variables specified in the rule are "set" within the module configuration.
 func (e *ExclusiveValidator) Validate(
 	bp config.Blueprint,
@@ -326,10 +308,8 @@ func (e *ExclusiveValidator) Validate(
 	modIdx int) error {
 	var setVarNames []string
 	handler := func(t Target) error {
-		for _, val := range t.Values {
-			if e.isVarSet(val) {
-				setVarNames = append(setVarNames, t.Name)
-			}
+		if isVarSet(t.Values) {
+			setVarNames = append(setVarNames, t.Name)
 		}
 		return nil
 	}
@@ -339,6 +319,69 @@ func (e *ExclusiveValidator) Validate(
 	if len(setVarNames) > 1 {
 		modPath := config.Root.Groups.At(bp.GroupIndex(group.Name)).Modules.At(modIdx).Source
 		return config.BpError{Err: fmt.Errorf("%s\n the following are set %s", rule.ErrorMessage, strings.Join(setVarNames, ", ")), Path: modPath}
+	}
+	return nil
+}
+
+// ConditionalValidator implements the RuleValidator interface for the 'dependsOn' validation type.
+type ConditionalValidator struct{}
+
+// Validate checks if the variables specified in the rule fall within the specified numeric range or length constraints.
+func (c *ConditionalValidator) Validate(
+	bp config.Blueprint,
+	mod config.Module,
+	rule modulereader.ValidationRule,
+	group config.Group,
+	modIdx int) error {
+
+	// optional := true
+	// if v, ok := rule.Inputs["optional"]; ok {
+	// 	if b, ok := v.(bool); ok {
+	// 		optional = b
+	// 	}
+	// }
+	modPath := config.Root.Groups.At(bp.GroupIndex(group.Name)).Modules.At(modIdx).Source
+
+	trigger, ok := parseString(rule.Inputs["trigger"])
+	if !ok {
+		return config.BpError{Err: fmt.Errorf("validation rule for module %q is missing 'trigger'", mod.ID), Path: modPath}
+	}
+
+	trigger_original_value, _, err := getModuleSettingValues(bp, group, modIdx, mod, trigger)
+	if err != nil {
+		// return config.BpError{
+		// 	Err:  fmt.Errorf("setting %q not found in module %q settings", trigger, mod.ID),
+		// 	Path: config.Root.Groups.At(bp.GroupIndex(group.Name)).Modules.At(modIdx).Settings.Dot(trigger),
+		// }
+	}
+	trigger_expected_value, is_expected_given := convertToCty(rule.Inputs["trigger_value"])
+	fmt.Println("DEBUG: ", trigger_original_value, trigger_expected_value)
+	if !is_expected_given && !isVarSet(trigger_original_value) {
+		return nil
+	}
+	if is_expected_given && !ValuesMatch(trigger_original_value, trigger_expected_value) {
+		return nil
+	}
+
+	dependent, ok := parseString(rule.Inputs["dependent"])
+	if !ok {
+		return config.BpError{Err: fmt.Errorf("validation rule for module %q is missing 'dependent'", mod.ID), Path: modPath}
+	}
+
+	dependent_original_value, _, err := getModuleSettingValues(bp, group, modIdx, mod, dependent)
+	if err != nil {
+		return config.BpError{
+			Err:  fmt.Errorf("setting %q not found in module %q settings", dependent, mod.ID),
+			Path: config.Root.Groups.At(bp.GroupIndex(group.Name)).Modules.At(modIdx).Settings.Dot(dependent),
+		}
+	}
+	dependent_expected_value, is_expected_given := convertToCty(rule.Inputs["dependent_value"])
+	fmt.Println("DEBUG: dependent: ", dependent_original_value, dependent_expected_value)
+	if !is_expected_given && !isVarSet(dependent_original_value) {
+		return config.BpError{Err: fmt.Errorf("%s\n variable %s is not set", rule.ErrorMessage, dependent), Path: modPath}
+	}
+	if is_expected_given && !ValuesMatch(dependent_original_value, dependent_expected_value) {
+		return config.BpError{Err: fmt.Errorf("%s\n variable '%s' value doesn't match\n expected: '%s', got: '%s'", rule.ErrorMessage, dependent, dependent_expected_value.GoString(), dependent_original_value[0].GoString()), Path: modPath}
 	}
 	return nil
 }

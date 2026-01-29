@@ -115,6 +115,27 @@ func parseStringList(v interface{}) ([]string, bool) {
 	}
 }
 
+// parseString normalizes an input that may be a single string or a list containing a single string into a string.
+func parseString(v interface{}) (string, bool) {
+	if v == nil {
+		return "", false
+	}
+	switch vv := v.(type) {
+	case string:
+		return vv, true
+	case []interface{}:
+		if len(vv) == 1 {
+			s, ok := vv[0].(string)
+			return s, ok
+		}
+	case []string:
+		if len(vv) == 1 {
+			return vv[0], true
+		}
+	}
+	return "", false
+}
+
 // Target represents a resolved target (module-setting or blueprint var) for validation.
 type Target struct {
 	Name        string
@@ -202,4 +223,66 @@ func parseBoolInput(inputs map[string]interface{}, key string, defaultVal bool) 
 		return false, fmt.Errorf("'%s' must be a boolean, not %T", key, v)
 	}
 	return b, nil
+}
+
+// isVarSet returns true if the value is known, non-null, and non-empty (positive number, non-empty string, true bool, or non-empty collection).
+func isVarSet(values []cty.Value) bool {
+	for _, val := range values {
+		if val.IsNull() || !val.IsKnown() {
+			return false
+		}
+		switch val.Type() {
+		case cty.String:
+			return val.AsString() != ""
+		case cty.Number:
+			return val.AsBigFloat().Sign() != 0
+		case cty.Bool:
+			return val.True()
+		default:
+			// For lists, maps, and sets, consider them "set" if they are not empty.
+			return val.LengthInt() > 0
+		}
+	}
+	return false
+}
+
+func convertToCty(in interface{}) (cty.Value, bool) {
+	if in == nil {
+		return cty.NullVal(cty.DynamicPseudoType), true
+	}
+	switch v := in.(type) {
+	case bool:
+		return cty.BoolVal(v), true
+	case int:
+		return cty.NumberIntVal(int64(v)), true
+	case float64:
+		return cty.NumberFloatVal(v), true
+	case string:
+		return cty.StringVal(v), true
+	default:
+		return cty.NilVal, false
+	}
+}
+
+// valuesMatch compares a cty.Values.
+// It handles all types including lists and objects.
+func ValuesMatch(original []cty.Value, expectedCty cty.Value) bool {
+	expectedList := evaluateAndFlatten(expectedCty)
+	fmt.Println("DEBUG match: ", original, expectedList)
+	if len(original) != len(expectedList) {
+		return false
+	}
+	for i := range original {
+		original_value := original[i]
+		expected_value := expectedList[i]
+		is_original_null := original_value.IsNull() || (original_value.Type() == cty.Bool && !original_value.True())
+		is_expected_null := expected_value.IsNull() || (expected_value.Type() == cty.Bool && !expected_value.True())
+		if is_original_null && is_expected_null {
+			continue
+		}
+		if !original[i].Equals(expectedList[i]).True() {
+			return false
+		}
+	}
+	return true
 }

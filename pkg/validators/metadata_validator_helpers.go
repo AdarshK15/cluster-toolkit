@@ -230,6 +230,9 @@ func parseBoolInput(inputs map[string]interface{}, key string, defaultVal bool) 
 
 // isVarSet checks if the value is "truthy": non-null, known, and not "empty" (false, 0, empty string/list/map).
 func isVarSet(values []cty.Value) bool {
+	if len(values) == 0 {
+		return false
+	}
 	for _, val := range values {
 		if val.IsNull() || !val.IsKnown() {
 			return false

@@ -758,3 +758,12 @@ def test_get_reservation_details_error(mocker):
         )
     
     lkp._get_reservation.assert_called_once_with("my-project", "us-central1-a", "my-reservation")
+
+def test_node_accelerator_topology():
+    cfg = TstCfg(
+        nodeset={
+            "n": TstNodeset(accelerator_topology="2x2"),
+        }
+    )
+    lkp = util.Lookup(cfg)
+    assert lkp.node_accelerator_topology("c-n-0") == "2x2"

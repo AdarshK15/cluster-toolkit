@@ -1,0 +1,100 @@
+use pr-reviewer to reciew this pr, use dickie review also in parallel
+https://github.com/GoogleCloudPlatform/cluster-toolkit/pull/3926
+15:15
+
+
+I have started two separate subagents to review PR #3926 in parallel:
+
+PR Reviewer: Specifically adhering to the pr-reviewer skill instructions to ensure strict checklist execution, style/context alignment, testing validation, and deep code analysis.
+Duckie: Focused heavily on cross-orchestrator impacts between GKE and Slurm, potential regressions, and flow/style issues.
+They are running in the background right now. I will notify you with a synthesized response once both have completed their analysis.
+
+I have received the detailed analysis from the pr-reviewer subagent. It has highlighted some great points regarding Terraform validation rules for network and subnetwork variables being mutually exclusive with network_attachment.
+
+I am currently waiting for the Duckie subagent to finish its parallel review. Once that arrives, I will consolidate both reviews for you!
+
+Here is the synthesized pull request review from both the pr-reviewer and Duckie subagents, consolidated into a single, comprehensive review that you can share on GitHub.
+
+📝 PR Summary
+This PR adds support for Private Service Connect (PSC) interfaces across Slurm modules (login, controller, nodesets, partitions, and internal instance templates) by introducing the network_attachment field into the additional_networks variable. It also updates the module inspection tests in pkg/inspect/modules_test.go to explicitly differentiate between GKE modules and Slurm modules regarding PSC interface support, properly enforcing mutual exclusivity between subnetwork and network_attachment.
+
+🌍 Cross-Orchestrator Impact
+Slurm Impact: Slurm components now robustly support PSC interfaces, unlocking advanced networking topologies. The changes correctly plumb network_attachment down to the lowest level google_compute_instance block inside community/modules/internal/slurm-gcp/instance/main.tf and instance_template/main.tf.
+GKE Impact: The author correctly isolated GKE modules (like gke-node-pool and gke-cluster) from this change, acknowledging that GKE's additional_node_network does not natively support PSC interfaces at this time. The validation updates in pkg/inspect/modules_test.go cleanly introduce a wantPSC schema for Slurm without breaking the existing want schema used by GKE modules. No GKE regressions are anticipated.
+🧪 Testing & Validation
+Needs New Integration Tests: Yes
+Tests to Run: tools/cloud-build/daily-tests/builds/ (No specific Slurm PSC test exists yet)
+Validation Comments: The PR lacks an example blueprint or a corresponding integration test in tools/cloud-build/daily-tests/builds/ that exercises the network_attachment functionality. While understandable as it might require pre-existing PSC endpoints in the test project, adding an example blueprint in examples/ that mounts a PSC interface to a Slurm login node would prevent future regressions and greatly improve discoverability for end-users.
+🔍 Detailed Code Reviews
+1. community/modules/internal/slurm-gcp/internal_instance_template/variables.tf (and mirrored in other updated variables.tf files)
+Priority: Medium
+Code Change Required: Yes
+Reviewer Context: The current validation rules successfully ensure that subnetwork and network_attachment are mutually exclusive. However, they do not verify that the network variable is null when network_attachment is provided. The GCP provider expects both network and subnetwork to be absent when using network_attachment. To avoid provider-level runtime errors, the validation block should also prevent passing network.
+Draft Comment:
+The current validation is a great addition, but to prevent GCP provider runtime errors, we should also ensure that network is null when a network_attachment is specified. The provider expects both network and subnetwork to be omitted in this scenario. Consider updating the validation condition to something like:
+
+terraform
+
+
+validation {
+  condition     = !anytrue([for nic in var.additional_networks : ((nic.subnetwork != null || nic.network != null) && nic.network_attachment != null)])
+  error_message = "Both network/subnetwork and network_attachment cannot be provided simultaneously for additional_networks."
+}
+2. community/modules/scheduler/schedmd-slurm-gcp-v6-login/variables.tf (Line 144)
+Priority: Low / Nit
+Code Change Required: No
+Reviewer Context: Checking != null is the idiomatic Terraform 1.3+ way to check if an optional attribute was provided. However, users passing data from wrapper modules might explicitly provide an empty string "" instead of null. If a user supplies subnetwork = "" and network_attachment = null, this validation will technically pass since "" != null evaluates to true, but GCP will later reject the empty string.
+Draft Comment:
+Great use of Terraform validation blocks here! Just a quick nit: checking != null might still let an empty string "" slip through if a user explicitly declares it that way from a wrapper module (e.g. subnetwork = ""). It's an edge case, but checking the string length (e.g., coalesce(nic.subnetwork, "") != "") might be slightly more bulletproof. Feel free to leave as is if you prefer to rely on the underlying GCP provider to throw the empty-string error!
+
+3. community/modules/scheduler/schedmd-slurm-gcp-v6-controller/variables.tf (Line 310)
+Priority: Nit
+Code Change Required: No
+Reviewer Context: The additional_networks nested object inside nodeset and login_nodes lacks the Terraform validation block that guarantees mutual exclusivity. While the child modules (e.g., nodeset/variables.tf) have the validation and will catch it during terraform plan, adding it to the root variables creates a "fail-fast" behavior for the user.
+Draft Comment:
+I noticed that the validation blocks for additional_networks were added directly to variables_controller_instance.tf, but they aren't present for the nested additional_networks inside the nodeset and login_nodes variable objects here. The child modules will definitely catch misconfigurations during plan, but duplicating the validation blocks at this root level (if feasible) could help users fail faster and point them directly to their blueprint misconfiguration.
+
+💡 Repo-Wide Suggestions
+Copyright Headers: Ensure any heavily modified files have their copyright headers updated to include 2026 per the cluster-toolkit style guide.
+Variable Synchronization: The way additional_networks is defined is heavily duplicated across many variables.tf files. The usage of modules_test.go with the dual wantPSC vs want structs to enforce type consistency is an excellent practice. As this struct continues to grow, maintaining this unified source of truth for interface definitions is critical.
+Let me know if you would like me to adjust the tone or if you need any follow-ups on specific lines of code in the PR!
+
+15:15
+also give full context of this in proper structure so that i can understand what this PR is trying to do and what I am reviewing
+15:15
+
+
+Here is the full context of what this Pull Request is trying to achieve, structured so you can clearly understand the feature you are reviewing.
+
+🎯 High-Level Goal
+This PR aims to introduce Private Service Connect (PSC) interface support to Slurm clusters provisioned by the Cluster Toolkit. PSC allows services to securely communicate across VPC networks without exposing traffic to the public internet.
+
+🏗️ How it is Implemented
+To support PSC, Google Cloud requires users to specify a network_attachment when configuring a virtual machine's network interface.
+
+This PR accomplishes this by:
+
+Expanding the Network Schema: It updates the additional_networks variable across all major Slurm modules (login nodes, controllers, nodesets, partitions, and internal instance templates) to accept a new network_attachment string.
+Plumbing the Variable: It pipes this new network_attachment variable all the way down to the lowest-level Terraform resource (google_compute_instance and google_compute_instance_template).
+Adding Validation: Because GCP requires that you use either standard networking (VPC/Subnet) or a PSC Network Attachment—but never both on the same interface—the author added Terraform validation blocks to ensure users don't configure conflicting inputs.
+🔀 Why GKE is Excluded (The "Cross-Orchestrator" Aspect)
+The Cluster Toolkit supports two main orchestrators: Slurm (using standard Compute Engine VMs) and GKE (Google Kubernetes Engine).
+
+Currently, GKE's underlying networking schema (additional_node_network) does not natively support mapping PSC network_attachment interfaces in the same way standard VMs do. The PR author recognized this and intentionally isolated the feature so it only applies to Slurm modules. They also updated the internal Golang testing suite (pkg/inspect/modules_test.go) to test Slurm against the new PSC schema (wantPSC), while ensuring GKE continues testing against the legacy standard schema (want).
+
+🧐 What You Are Reviewing
+When you look at this PR, you are essentially evaluating three things:
+
+Variable Updates: Did they correctly add the network_attachment field to the additional_networks object in all relevant Slurm variables.tf files?
+Logic and Plumb-through: Is the new variable correctly passed from the top-level modules down to the actual instance templates?
+Safety / Guardrails: Are the Terraform validation rules robust enough to stop users from accidentally passing both a subnetwork and a network_attachment at the same time? (This is what the review feedback focuses on tightening up!)
+This context should help frame exactly why the feedback in the synthesized review focuses so heavily on the validation blocks and the handling of edge-cases like empty strings ("") and omitted network fields.
+
+(The background task confirms that the PR title is "Add support for PSC interfaces for Slurm nodesets and login nodes". The synthesized context provided above covers exactly what the author is intending to do! Let me know if you are ready to proceed with posting the review or need anything else.)
+
+15:23
+...
+15:23
+
+
+Is there anything else you need help with regarding this Pull Request or any other task? I'm here if you need to refine the review, dig deeper into any of the files, or move on to something new!

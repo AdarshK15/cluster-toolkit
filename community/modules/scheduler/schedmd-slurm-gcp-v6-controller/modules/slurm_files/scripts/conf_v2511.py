@@ -37,13 +37,12 @@ class SlurmConfigGeneratorV2511(SlurmConfigGenerator):
         if enable_expedited_requeue:
             slurmctld_params.append("enable_expedited_requeue")
 
-        if slurmctld_params:
-            params = conf_options.get("SlurmctldParameters", [])
+        if slurmctld_params and "SlurmctldParameters" in conf_options:
+            params = conf_options["SlurmctldParameters"]
             if isinstance(params, list):
                 for new_param in slurmctld_params:
                     if new_param not in params:
                         params.append(new_param)
-                conf_options["SlurmctldParameters"] = params
 
         # Configure Node health checks to execute only at node startup
         enable_health_check_start_only = self.lkp.cfg.get("enable_health_check_start_only", False)

@@ -394,7 +394,7 @@ variable "experimental" {
 variable "enable_expedited_requeue" {
   description = "Enables Expedited Requeue, which automatically requeues eligible jobs and grants them the highest priority upon node failure. (Usage: sbatch --requeue=expedite)"
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "enable_health_check_start_only" {

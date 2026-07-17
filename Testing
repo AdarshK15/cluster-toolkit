@@ -1,0 +1,49 @@
+6. Fixes (Grouped by Area)
+Controller (slurmctld)
+Fixed interactive jobs erroneously killed by InactivityLimit under controller congestion.
+Fixed possible crash from pointer-comparison mismatches under heavy load.
+Fixed crashes: HetJob component failing to start; removing all of a pending job's licenses; race condition during startup (I/O processed before conn plugin init); race in x11 forwarding (double free); segfault scheduling on GRES reservations after restart.
+Fixed hangs/deadlocks: during reconfigure/shutdown from slow client I/O; race condition during shutdown reading a connection.
+Fixed unresponsive nodes not being marked DOWN on clusters with frequent reconfigures.
+Fixed reservation bugs: overlap checks missing conflicts across DST transitions; incorrect error messages in overlap sanity checks; deadlock replacing nodes in reservations; retained-node bug after nodes move out of a reservation's partition; jobs not held when a requested reservation is purged; reservation updates not persisting to DB.
+Fixed DefMemPerCPU formatting; IPv6 control-host bracketing in scontrol show federation.
+Fixed node-reboot handling with older slurmd; background thread no longer waits on purge-files thread while holding job/node write locks.
+Various performance/lock-contention fixes (dbd agent packing, avoiding reverse DNS lookups unless DebugFlags=conmgr set, node-write-lock removal for several read-only RPCs).
+Accounting (slurmdbd / accounting_storage)
+Fixed performance regression from lock contention packing dbd-agent messages.
+Fixed state-replay message leak on version mismatch.
+Fixed crash/deadlock races during shutdown (persistent connections, federation active, service-connection teardown).
+Fixed sacctmgr load parsing for files with typed TRES; runtime-added assoc/wckey UID NO_VAL under use_client_ids.
+Improved hourly rollup and archive/purge performance on large/active clusters.
+Fixed ~37s extra delay in slurmdbd reconnection retries on NTP-synced systems.
+Compute Node / Job Execution (slurmd, slurmstepd)
+Fixed HetJob step-launch crash between 26.05 slurmd and older (≤24.11) srun.
+Fixed incompatibility between 26.05 slurmd and 25.05+ slurmstepd when a 24.11 sattach is used (would hang).
+Fixed memory leaks in cgroup plugin init and jobacctinfo aggregation crash under enable_stepmgr + jobacct_gather/none.
+Fixed jobs stuck in COMPLETING with PrologFlags=RunInJob.
+Fixed epilog running multiple times on TERMINATE_JOB retries.
+Scheduling / stepmgr / Topology
+Fixed torus3d placement overlap detection and node-count overflow guard; added adaptive Morton encoding for large torus dimensions.
+Fixed slow scheduling for multi-segment jobs under topology/block with undersized blocks.
+Fixed stepmgr crashes/leaks: async step launch crash across mismatched srun/slurmd releases; memory leak in stepmgr stepd; sbcast with auth/slurm issues.
+Reject/validate fixes: reject sbatch --external combined with --wrap; reject jobs where num_tasks < min_nodes; validate --segment and arbitrary task distribution against incompatible options (topology/block, --spread-job, CR_LLN, etc.).
+REST API (slurmrestd)
+Fixed pipelined HTTP/1.1 keep-alive request handling; memory leak on early connection termination.
+Fixed memory leak from empty node_list in reservation POST bodies.
+Fixed 200-vs-404 behavior querying nonexistent partitions.
+Numerous v0.0.45 field additions/renames (see Breaking Changes and New Features).
+CLI Tools
+sh5util: fixed HDF5 "Malformed file" error on -I extraction, memory leaks, exit code for -h/-V.
+sacctmgr: fixed silently-ignored trailing characters in numeric options, default-account removal bug with multiple defaults, quiet/verbose mutual exclusivity.
+scontrol: fixed listpids output when a step terminates mid-query; array-job-id formatting in error messages.
+srun: reject --async outside an existing allocation; fixed minor memory leaks in job description handling; removed old broken exit-code-108 retry logic for Open MPI.
+GPU (gpu/nvml)
+Fixed --gpu-freq to set actual memory/GPU clocks (not deprecated "applications clocks") on CUDA 11.3+, preventing build errors on CUDA 13.0+.
+Fixed clock-frequency reset across multiple GPUs at job completion under cgroup device constraints.
+Fixed --gpu-freq application without an explicit memory clock frequency.
+Networking / Switch (switch/hpe_slingshot)
+Fixed memory leak on fabric-manager 404 responses to job-lookup GETs.
+Fixed non-stepmgr extern steps incorrectly trying to delete jobs from the fabric manager on completion.
+Packaging / Build
+Fixed gcc-16 and FreeBSD build issues; _unitdir fallback typo in slurm.spec; rpmbuild --with selinux.
+Fixed shtml2html.py warning under Python 3.14+.

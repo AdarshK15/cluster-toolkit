@@ -65,6 +65,7 @@ class ResumeJobData:
     job_id: int
     partition: str
     nodes_alloc: List[str]
+    accelerator_topology: Optional[str] = None
 
 @dataclass(frozen=True)
 class ResumeData:
@@ -85,6 +86,7 @@ def get_resume_file_data() -> Optional[ResumeData]:
             job_id = jo.get("job_id"),
             partition = jo.get("partition"),
             nodes_alloc = util.to_hostnames(jo.get("nodes_alloc")),
+            accelerator_topology = jo["layout"].split("=")[-1] if jo.get("layout") else None,
         )
         jobs.append(job)
     return ResumeData(jobs=jobs)
@@ -279,6 +281,11 @@ def group_nodes_bulk(nodes: List[str], resume_data: Optional[ResumeData], lkp: u
         
         if lkp.is_flex_node(model) or lkp.is_node_mig(model):
             chunk_size = ZONAL_MIG_SIZE_LIMIT
+        elif lkp.is_tpu_node(model) and lkp.is_static_node(model):
+            ns = lkp.node_nodeset(model)
+            chunk_size = lkp.get_tpu_chunk_size(ns)
+            chunks_dict = lkp.group_tpu_nodes_by_chunk_idx(nodes, chunk_size)
+            return [chunks_dict[idx] for idx in sorted(chunks_dict.keys())]
         elif lkp.node_is_tpu(model):
             ns_name = lkp.node_nodeset_name(model)
             chunk_size = tpu.TPU.make(ns_name, lkp).vmcount
@@ -503,13 +510,15 @@ def resume_nodes(nodes: List[str], resume_data: Optional[ResumeData]):
             "node bulk groups: \n{}".format(yaml.safe_dump(grouped_nodelists).rstrip())
         )
 
-    tpu_chunks, flex_chunks, mig_chunks = [], [], []
+    tpu_chunks, gce_tpu_chunks, flex_chunks, mig_chunks = [], [], [], []
     bi_inserts = {}
 
     for group, chunk in grouped_nodes.items():
         model = chunk.nodes[0]
 
-        if lkp.node_is_tpu(model):
+        if lkp.is_tpu_node(model):
+            gce_tpu_chunks.append(chunk)
+        elif lkp.node_is_tpu(model):
             tpu_chunks.append(chunk.nodes)
         elif lkp.is_flex_node(model):
             flex_chunks.append(chunk)
@@ -519,6 +528,18 @@ def resume_nodes(nodes: List[str], resume_data: Optional[ResumeData]):
             bi_inserts[group] = create_instances_request(
                 chunk.nodes, chunk.placement_group, chunk.excl_job_id, chunk.is_job_request
             )
+
+    for chunk in gce_tpu_chunks:
+        try:
+            job_topo = None
+            if resume_data and chunk.excl_job_id is not None:
+                for job in resume_data.jobs:
+                    if job.job_id == chunk.excl_job_id and job.accelerator_topology:
+                        job_topo = job.accelerator_topology
+                        break
+            mig_flex.resume_tpu_chunk(chunk.nodes, chunk.excl_job_id, lkp, topology=job_topo)
+        except Exception:
+            log.exception(f"failed to resume TPU chunk {chunk.nodes}")
 
     for chunk in flex_chunks:
         try:
@@ -852,7 +873,7 @@ def _allocate_nodes_to_placements(nodes: List[str], excl_job_id:Optional[int], l
     # rather than returning early. This ensures massive DWS Flex requests (e.g. 500 nodes)
     # are chunked into multiple hardware-compliant MIGs via `calculate_chunk_size`
     # instead of exceeding single physical placement block limits.
-    if lkp.node_is_tpu(model):
+    if lkp.is_tpu_node(model) or lkp.node_is_tpu(model):
         return no_pp
     if not (nodeset.enable_placement and valid_placement_node(model)):
         return no_pp

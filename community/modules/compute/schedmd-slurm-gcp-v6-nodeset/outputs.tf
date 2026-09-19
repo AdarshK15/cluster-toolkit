@@ -38,7 +38,7 @@ output "nodeset" {
   }
 
   precondition {
-    condition     = (var.accelerator_topology == null) || try(tonumber(split("x", var.accelerator_topology)[1]) % local.guest_accelerator[0].count == 0, false)
+    condition     = (var.accelerator_topology == null) || length(local.guest_accelerator) == 0 || try(tonumber(split("x", var.accelerator_topology)[1]) % local.guest_accelerator[0].count == 0, false)
     error_message = "accelerator_topology must be divisible by number of gpus in machine."
   }
 
@@ -118,5 +118,20 @@ output "nodeset" {
   precondition {
     condition     = !(var.provisioning_engine == "MIG" && var.enable_placement && !var.dws_flex.enabled)
     error_message = "MIG engine currently does not support runtime dynamic compact placement policies (enable_placement = true). Please set enable_placement = false when using provisioning_engine = 'MIG'. Compact placement and Workload Policies for MIGs will be supported in a future release."
+  }
+
+  precondition {
+    condition     = !(startswith(var.machine_type, "ct") || startswith(var.machine_type, "tpu")) || endswith(var.machine_type, "-4t")
+    error_message = "TPU nodesets currently only support 4-chip machine types ending in '-4t' (e.g. ct6e-standard-4t, tpu7x-standard-4t, ct5p-hightpu-4t)."
+  }
+
+  precondition {
+    condition     = !(startswith(var.machine_type, "ct") || startswith(var.machine_type, "tpu")) || var.node_count_static == 0 || var.accelerator_topology != null
+    error_message = "Static TPU nodesets (node_count_static > 0) require accelerator_topology to be specified."
+  }
+
+  precondition {
+    condition     = !(startswith(var.machine_type, "ct") || startswith(var.machine_type, "tpu")) || !(var.node_count_static > 0 && var.node_count_dynamic_max > 0)
+    error_message = "TPU nodesets cannot mix static and dynamic nodes; set either node_count_static > 0 or node_count_dynamic_max > 0."
   }
 }

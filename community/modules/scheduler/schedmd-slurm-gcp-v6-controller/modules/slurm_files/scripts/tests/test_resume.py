@@ -584,3 +584,56 @@ def test_resume_mig_nodes_stockout_multishard_exclusive(mock_compute_prop, mock_
   create_calls = mock_compute.regionInstanceGroupManagers().createInstances.call_args_list
   assert len(create_calls) == 1
   assert create_calls[0].kwargs["instanceGroupManager"] == "c-n-mig-0"
+
+def test_mig_flex_tpu_resume(mocker):
+    import mig_flex
+    from util import MachineType
+
+    ns_dyn = TstNodeset(
+        "tpudyn",
+        node_count_static=0,
+        node_count_dynamic_max=4,
+        accelerator_topology=None,
+        zone_policy_allow=["us-central1-a"],
+        instance_template="https://www.googleapis.com/compute/v1/projects/p/global/instanceTemplates/tpl-1",
+    )
+    ns_static = TstNodeset(
+        "tpustatic",
+        node_count_static=4,
+        node_count_dynamic_max=0,
+        accelerator_topology="2x4",
+        zone_policy_allow=["us-central1-a"],
+        instance_template="https://www.googleapis.com/compute/v1/projects/p/global/instanceTemplates/tpl-2",
+    )
+    cfg = TstCfg(
+        slurm_cluster_name="c",
+        nodeset={"tpudyn": ns_dyn, "tpustatic": ns_static},
+    )
+    lkp = util.Lookup(cfg)
+    lkp.template_info = unittest.mock.Mock(
+        return_value=unittest.mock.Mock(
+            machine_type=MachineType(
+                name="ct6e-standard-4t", guest_cpus=0, memory_mb=0, accelerators=[]
+            ),
+            gpu=None,
+        )
+    )
+
+    mock_run = mocker.patch("mig_flex.util.run")
+    mock_resume_single = mocker.patch("mig_flex._resume_single_tpu_node")
+
+    # 1. Partial static TPU slice (vmcount=2, only 1 node passed) -> aborts and powers down slice
+    mig_flex.resume_tpu_chunk(["c-tpustatic-0"], job_id=10, lkp=lkp, topology=None)
+    mock_resume_single.assert_not_called()
+    mock_run.assert_called_once()
+    assert "state=POWER_DOWN_FORCE" in mock_run.call_args[0][0]
+    assert "nodename=c-tpustatic-[0-1]" in mock_run.call_args[0][0]
+
+    # 2. Dynamic TPU slice with job topology="2x4" -> calls _resume_single_tpu_node with full slice and topology="2x4"
+    mock_run.reset_mock()
+    mig_flex.resume_tpu_chunk(
+        ["c-tpudyn-0", "c-tpudyn-1"], job_id=11, lkp=lkp, topology="2x4"
+    )
+    mock_resume_single.assert_called_once_with(
+        ["c-tpudyn-0", "c-tpudyn-1"], 11, lkp, topology="2x4"
+    )

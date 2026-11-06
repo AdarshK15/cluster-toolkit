@@ -17,6 +17,7 @@
 
 from typing import List, Optional, Union
 
+import math
 import os
 import sys
 import stat
@@ -225,12 +226,16 @@ def mount_fstab(mounts: list[NSMount], log):
                 raise e
 
 
-def wait_for_file(file_path: Path, timeout: int = 300):
+def wait_for_file(file_path: Path, timeout: int = 600):
     """Wait for a file to exist and be non-empty at the given path."""
     log.info(f"Waiting up to {timeout}s for file to exist and be ready: {file_path}")
 
     for retry, wait in enumerate(util.backoff_delay(1.0, timeout), 1):
         try:
+            # Bust NFS client directory attribute/negative-dentry cache when polling
+            # shared key storage during cold HA controller + login bring-up.
+            if file_path.parent.exists():
+                os.listdir(file_path.parent)
             if file_path.exists() and file_path.stat().st_size > 0:
                 with open(file_path, 'rb') as f:
                     f.read(1)
@@ -368,6 +373,92 @@ def slurm_key_mount_handler():
     shutil.rmtree(mnt.local_mount)
 
 
+def calculate_nfsd_threads(lkp: util.Lookup, vcpus: Optional[int] = None) -> int:
+    """Compute controller rpc.nfsd thread pool size from cluster client count and vCPUs.
+
+    Linux kernel sunrpc (svc_check_conn_limits) caps concurrent TCP :2049 sockets at
+    (threads + 3) * 20; the OS default threads=8 evicts client sockets past 220 nodes.
+    Targeting ceil(n_clients / 16) gives ~1.25x connection headroom per node while
+    bounding threads by controller vCPUs so large power-save definitions stay safe.
+    """
+    compute_clients = sum(
+        sum(lkp.static_dynamic_sizes(ns)) for ns in lkp.power_managed_nodesets()
+    )
+    nodeset_dyn = getattr(lkp.cfg, "nodeset_dyn", None) or {}
+    if nodeset_dyn:
+        partitions = getattr(lkp.cfg, "partitions", None) or {}
+        for part in partitions.values():
+            p_dyn = (
+                part.get("partition_nodeset_dyn")
+                if isinstance(part, dict)
+                else getattr(part, "partition_nodeset_dyn", None)
+            )
+            if not p_dyn:
+                continue
+            p_conf = (
+                part.get("partition_conf")
+                if isinstance(part, dict)
+                else getattr(part, "partition_conf", None)
+            ) or {}
+            max_nodes = p_conf.get("MaxNodes")
+            if isinstance(max_nodes, int) or (isinstance(max_nodes, str) and max_nodes.isdigit()):
+                compute_clients += int(max_nodes)
+    login_groups = getattr(lkp.cfg, "login_groups", None) or {}
+    login_clients = sum(
+        int(lg.get("num_instances") or 1)
+        for lg in login_groups.values()
+    )
+    backup_clients = (
+        1
+        if (
+            getattr(lkp.cfg, "slurm_backup_controller_ip", None)
+            or getattr(lkp.cfg, "slurm_backup_controller_name", None)
+        )
+        else 0
+    )
+    n_clients = compute_clients + login_clients + backup_clients
+    cpu_cnt = max(1, vcpus if vcpus is not None else (os.cpu_count() or 1))
+    min_threads = max(16, 4 * cpu_cnt)
+    # Idle nfsd kthreads sleep with ~16 KB stack each (~32 MB at 2,048 threads = 41,020 max TCP
+    # sockets), so do not artificially cap large clusters on small nosmt controllers at 64*vCPUs.
+    max_threads = 2048
+    needed = math.ceil(max(1, n_clients) / 16)
+    return min(max(min_threads, needed), max_threads)
+
+
+def configure_nfsd_threads(
+    lkp: Optional[util.Lookup] = None,
+    proc_nfsd: Path = Path("/proc/net/rpc/nfsd"),
+) -> int:
+    """Persist and apply dynamic controller nfsd thread count."""
+    lkp = lkp or util.lookup()
+    threads = int(calculate_nfsd_threads(lkp))
+    try:
+        if proc_nfsd.exists():
+            for line in proc_nfsd.read_text().splitlines():
+                if line.startswith("th "):
+                    parts = line.split()
+                    if len(parts) >= 2 and int(parts[1]) == threads:
+                        log.debug(f"Controller nfsd already running with threads={threads}")
+                        return threads
+    except Exception:
+        pass
+
+    sudo_prefix = "" if os.geteuid() == 0 else "sudo -n "
+    log.info(
+        f"Configuring controller nfsd threads={threads} "
+        f"(max TCP connections={(threads + 3) * 20})"
+    )
+    res_conf = run(f"{sudo_prefix}/usr/sbin/nfsconf --set -- nfsd threads {threads}", timeout=30, check=False)
+    if res_conf.returncode != 0:
+        log.warning(f"Failed to persist nfsd threads via nfsconf: {res_conf.stderr}")
+    if proc_nfsd.exists():
+        res_live = run(f"{sudo_prefix}/usr/sbin/rpc.nfsd -- {threads}", timeout=30, check=False)
+        if res_live.returncode != 0:
+            log.warning(f"Failed to apply live rpc.nfsd {threads}: {res_live.stderr}")
+    return threads
+
+
 def setup_nfs_exports():
     """nfs export all needed directories"""
     lkp = util.lookup()
@@ -407,4 +498,6 @@ def setup_nfs_exports():
     with (exportsd / "slurm.exports").open("w") as f:
         f.write("\n")
         f.write("\n".join(lines))
-    run("exportfs -ra", timeout=30)
+    if to_export:
+        configure_nfsd_threads(lkp)
+    run("exportfs -ra", timeout=30, check=False)

@@ -1441,12 +1441,21 @@ def test_slurmsync_deferred_reconfigure_restart(
         "repair.poll_operations",
     ):
         mocker.patch(f"slurmsync.{name}")
-    mock_reconfigure = mocker.patch("util.scontrol_reconfigure")
+    call_order = []
+    mock_reconfigure = mocker.patch(
+        "util.scontrol_reconfigure",
+        side_effect=lambda *a, **kw: call_order.append("reconfigure"),
+    )
+    mocker.patch(
+        "slurmsync.sync_instances",
+        side_effect=lambda *a, **kw: call_order.append("sync_instances"),
+    )
 
     slurmsync.main()
 
     mock_reconfigure.assert_called_once()
     assert mock_reconfigure.call_args.kwargs["restart"] is expect_restart
+    assert call_order == ["reconfigure", "sync_instances"]
 def test_nodeset_slice_size():
     cfg = TstCfg(
         slurm_cluster_name="testcl",

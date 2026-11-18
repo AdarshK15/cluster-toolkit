@@ -102,7 +102,9 @@ deployment_groups:
               - nvidia-container-toolkit-base
               - libnvidia-container-tools
               - libnvidia-container1
-              - nvidia-fabricmanager
+              - libnvidia-nscq*
+              - nvidia-fabricmanager*
+              - nvidia-imex*
               - datacenter-gpu-manager-4-core
               - datacenter-gpu-manager-4-dev
               - datacenter-gpu-manager-4-cuda13
@@ -114,9 +116,11 @@ deployment_groups:
                 update_cache: true
             # Freeze NVIDIA fabric and DCGM
             - name: Freeze NVIDIA fabric and DCGM
-              ansible.builtin.dpkg_selections:
-                name: "{{ item }}"
-                selection: hold
+              ansible.builtin.command:
+                argv:
+                - apt-mark
+                - hold
+                - "{{ item }}"
               loop: "{{ nvidia_packages }}"
             post_tasks:
             - name: Enable NVIDIA DCGM by default
@@ -124,7 +128,7 @@ deployment_groups:
                 name: nvidia-dcgm.service
                 state: started
                 enabled: true
-     # Prerequisites for Mellanox/DOCA
+     # Prerequisites for Mellanox MFT
       - type: ansible-local
         destination: install_mellanox_deps.yml
         content: |

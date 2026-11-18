@@ -148,8 +148,8 @@ deployment_groups:
               - datacenter-gpu-manager-4-core
               - datacenter-gpu-manager-4-dev
               - datacenter-gpu-manager-4-cuda13
-              - libnvidia-nscq-595
-              - nvidia-fabricmanager
+              - libnvidia-nscq*
+              - nvidia-fabricmanager*
               - nccl-gib
             tasks:
             - name: Install NVIDIA DCGM
@@ -158,9 +158,11 @@ deployment_groups:
                 state: present
                 update_cache: true
             - name: Freeze NVIDIA fabric, DCGM, and NCCL-GIB packages
-              ansible.builtin.dpkg_selections:
-                name: "{{ item }}"
-                selection: hold
+              ansible.builtin.command:
+                argv:
+                - apt-mark
+                - hold
+                - "{{ item }}"
               loop: "{{ nvidia_packages }}"
             post_tasks:
             # Enable DCGM monitoring

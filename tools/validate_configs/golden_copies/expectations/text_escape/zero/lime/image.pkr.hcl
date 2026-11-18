@@ -95,8 +95,8 @@ locals {
   compute_version      = var.compute_endpoint_version == null ? "" : var.compute_endpoint_version
 
   source_image_project_id = (
-    var.source_image_project_id == null && var.source_image == null && var.source_image_family == "aci-cpu-rocky-linux-9-amd64"
-    ? ["advanced-compute-images"]
+    var.source_image_project_id == null && var.source_image == null && var.source_image_family != null
+    ? (startswith(var.source_image_family, "aci-") ? [var.project_id, "advanced-compute-images"] : null)
     : var.source_image_project_id
   )
 }

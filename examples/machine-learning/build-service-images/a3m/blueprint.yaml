@@ -55,11 +55,11 @@ deployment_groups:
               nvidia_packages_to_hold:
               - libnvidia-cfg1-*-server
               - libnvidia-compute-*-server
-              - libnvidia-nscq-*
+              - libnvidia-nscq*
               - nvidia-compute-utils-*-server
               - nvidia-fabricmanager*
               - nvidia-utils-*-server
-              - nvidia-imex-*
+              - nvidia-imex*
               - nvidia-container-toolkit
               - nvidia-container-toolkit-base
               - libnvidia-container-tools
@@ -281,7 +281,7 @@ deployment_groups:
                     state: absent
               when: "'installed' not in dkms_status.stdout"
       - type: ansible-local
-        destination: aperture_devices.yml  # This still needs to be run during startup http://google3/cloud/hosted/hypercomputecluster/terraform/slurm/nodeset_a3m.tf;l=16;rcl=767407261
+        destination: aperture_devices.yml  # This still needs to be run during startup
         content: |
           ---
           - name: Setup GPUDirect-TCPXO aperture devices

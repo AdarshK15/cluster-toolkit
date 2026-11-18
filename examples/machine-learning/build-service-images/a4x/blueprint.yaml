@@ -53,11 +53,11 @@ deployment_groups:
               nvidia_packages_to_hold:
               - libnvidia-cfg1-*-server
               - libnvidia-compute-*-server
-              - libnvidia-nscq-*
+              - libnvidia-nscq*
               - nvidia-compute-utils-*-server
               - nvidia-fabricmanager*
               - nvidia-utils-*-server
-              - nvidia-imex-*
+              - nvidia-imex*
               - nvidia-container-toolkit
               - nvidia-container-toolkit-base
               - libnvidia-container-tools
@@ -113,6 +113,7 @@ deployment_groups:
             "reboot": false,
             "install_ompi": true,
             "install_lustre": false,
+            "install_managed_lustre": false,
             "install_gcsfuse": true,
             "install_cuda": false,
             "allow_kernel_upgrades": false,

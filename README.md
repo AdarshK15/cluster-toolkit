@@ -333,7 +333,6 @@ Cluster Toolkit provides specialized modules for Slurm.
 
 The toolkit also supports standard OS images for general-purpose modules:
 - Rocky Linux 9
-- Debian 12
 - Ubuntu 24.04 LTS
 
 For more details, see [VM image support](docs/vm-images.md).

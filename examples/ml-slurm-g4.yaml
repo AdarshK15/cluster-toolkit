@@ -92,7 +92,7 @@ deployment_groups:
               - libnvidia-cfg1-*
               - libnvidia-common-*
               - libnvidia-compute-*
-              - libnvidia-nscq-*
+              - libnvidia-nscq*
               - nvidia-compute-utils-*
               - nvidia-dkms-*
               - nvidia-driver-*
@@ -102,7 +102,7 @@ deployment_groups:
               - nvidia-open*
               - nvidia-persistenced*
               - nvidia-utils-*
-              - nvidia-imex-*
+              - nvidia-imex*
               - nvidia-container-toolkit
               - nvidia-container-toolkit-base
               - libnvidia-container-tools
